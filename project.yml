@@ -1,0 +1,119 @@
+name: WinitSceneIntegration
+options:
+  bundleIdPrefix: rs.winit.scene-integration
+  deploymentTarget:
+    iOS: "17.0"
+
+targetTemplates:
+  App:
+    type: application
+    platform: iOS
+    sources:
+      - path: ios/main.c
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: NO
+        SUPPORTED_PLATFORMS: iphonesimulator
+        # The Rust library is built for arm64 only.
+        EXCLUDED_ARCHS: x86_64
+        TARGETED_DEVICE_FAMILY: "1,2"
+        LIBRARY_SEARCH_PATHS: "$(BUILT_PRODUCTS_DIR)"
+        # The library, and what `cargo rustc -- --print native-static-libs` says it needs.
+        OTHER_LDFLAGS:
+          - "-lwinit_scene_integration"
+          - "-lobjc"
+          - "-framework"
+          - UIKit
+          - "-framework"
+          - QuartzCore
+          - "-framework"
+          - Foundation
+          - "-framework"
+          - CoreGraphics
+          - "-framework"
+          - CoreFoundation
+    preBuildScripts:
+      - name: Build Rust library
+        basedOnDependencyAnalysis: false
+        shell: /bin/sh
+        script: |
+          set -eu
+          export PATH="$HOME/.cargo/bin:$PATH"
+          # Xcode's SDKROOT is the iOS SDK, which breaks build scripts compiled for the host.
+          unset SDKROOT
+          export CARGO_TARGET_DIR="$SRCROOT/target"
+          cargo build --manifest-path "$SRCROOT/Cargo.toml" --target aarch64-apple-ios-sim
+          cp "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/debug/libwinit_scene_integration.a" \
+            "$BUILT_PRODUCTS_DIR/"
+
+targets:
+  # Declares no scene manifest, as winit's iOS apps have until now.
+  NoManifest:
+    templates: [App]
+    info:
+      path: ios/NoManifest/Info.plist
+      properties: &info
+        CFBundleDisplayName: "$(PRODUCT_NAME)"
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundleName: "$(PRODUCT_NAME)"
+        CFBundlePackageType: APPL
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+
+  # Adopts the scene life cycle, which apps built with the iOS 27 SDK must do to launch.
+  SceneManifest:
+    templates: [App]
+    info:
+      path: ios/SceneManifest/Info.plist
+      properties:
+        <<: *info
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default Configuration
+
+  NoManifestUITests: &uitests
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ios/UITests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SUPPORTED_PLATFORMS: iphonesimulator
+        EXCLUDED_ARCHS: x86_64
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        TEST_TARGET_NAME: NoManifest
+    dependencies:
+      - target: NoManifest
+
+  SceneManifestUITests:
+    <<: *uitests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SUPPORTED_PLATFORMS: iphonesimulator
+        EXCLUDED_ARCHS: x86_64
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        TEST_TARGET_NAME: SceneManifest
+    dependencies:
+      - target: SceneManifest
+
+schemes:
+  NoManifest:
+    build:
+      targets:
+        NoManifest: all
+    test:
+      targets: [NoManifestUITests]
+  SceneManifest:
+    build:
+      targets:
+        SceneManifest: all
+    test:
+      targets: [SceneManifestUITests]
